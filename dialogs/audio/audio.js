@@ -365,7 +365,7 @@
             if (!WebUploader.Uploader.support()) {
                 $('#filePickerReady').after($('<div>').html(lang.errorNotSupport)).hide();
                 return;
-            } else if (!editor.getOpt('audioActionName')) {
+            } else if (!editor.getOpt('uploadServiceEnable') && !editor.getOpt('audioActionName')) {
                 $('#filePickerReady').after($('<div>').html(lang.errorLoadConfig)).hide();
                 return;
             }
@@ -385,21 +385,7 @@
             };
 
             if(editor.getOpt('uploadServiceEnable')) {
-                uploaderOption.customUpload = function (file, callback) {
-                    editor.getOpt('uploadServiceUpload')('audio', file, {
-                        success: function( res ) {
-                            callback.onSuccess(file, {_raw:JSON.stringify(res)});
-                        },
-                        error: function( err ) {
-                            callback.onError(file, err);
-                        },
-                        progress: function( percent ) {
-                            callback.onProgress(file, percent);
-                        }
-                    }, {
-                        from: 'audio'
-                    });
-                };
+                uploaderOption.customUpload = UE.api.customUploader(editor, 'audio', 'audio');
             }
 
             uploader = _this.uploader = WebUploader.create(uploaderOption);
@@ -742,9 +728,7 @@
             uploader.on('uploadSuccess', function (file, ret) {
                 var $file = $('#' + file.id);
                 try {
-                    var responseText = (ret._raw || ret),
-                        json = utils.str2json(responseText);
-                    json = editor.getOpt('serverResponsePrepare')(json);
+                    var json = UE.api.parseResponse(editor, ret);
                     if (json.state == 'SUCCESS') {
                         uploadaudioList.push({
                             'url': json.url,

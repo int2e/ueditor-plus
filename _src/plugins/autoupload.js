@@ -6,28 +6,27 @@
  * @date 2013-10-14
  */
 UE.plugin.register("autoupload", function () {
-    function sendAndInsertFile(file, editor) {
+    var uploadId = 0;
+    function sendAndInsertFile(file, editor, from) {
         var me = editor;
-        //模拟数据
         var fieldName,
             urlPrefix,
             maxSize,
             allowFiles,
-            actionUrl,
             loadingHtml,
             errorHandler,
             successHandler,
-            filetype = /image\/\w+/i.test(file.type) ? "image" : "file",
+            filetype = /^image\//i.test(file.type) || /\.(gif|jpe?g|png|bmp|webp)$/i.test(file.name || "") ? "image" : "file",
             fileExt = UE.plus.fileExt(file.name),
-            loadingId = "loading_" + (+new Date()).toString(36);
+            loadingId = "loading_" + editor.uid + "_" + (++uploadId);
 
         fieldName = me.getOpt(filetype + "FieldName");
-        urlPrefix = me.getOpt(filetype + "UrlPrefix");
+        urlPrefix = me.getOpt(filetype + "UrlPrefix") || "";
         maxSize = me.getOpt(filetype + "MaxSize");
         allowFiles = me.getOpt(filetype + "AllowFiles");
-        actionUrl = me.getActionUrl(me.getOpt(filetype + "ActionName"));
         errorHandler = function (title) {
-            var loader = me.document.getElementById(loadingId);
+            if (!me.document) return;
+            var loader = me.document && me.document.getElementById(loadingId);
             loader && domUtils.remove(loader);
             me.fireEvent("showmessage", {
                 id: loadingId,
@@ -47,7 +46,8 @@ UE.plugin.register("autoupload", function () {
                 '/images/spacer.gif">';
             successHandler = function (data) {
                 var link = urlPrefix + data.url,
-                    loader = me.document.getElementById(loadingId);
+                    loader = me.document && me.document.getElementById(loadingId);
+                if (!loader) return;
                 if (loader) {
                     domUtils.removeClasses(loader, "uep-loading");
                     loader.setAttribute("src", link);
@@ -69,8 +69,9 @@ UE.plugin.register("autoupload", function () {
                 "</p>";
             successHandler = function (data) {
                 var link = urlPrefix + data.url,
-                    loader = me.document.getElementById(loadingId);
+                    loader = me.document && me.document.getElementById(loadingId);
 
+                if (!loader) return;
                 var rng = me.selection.getRange(),
                     bk = rng.createBookmark();
                 rng.selectNode(loader).select();
@@ -82,7 +83,7 @@ UE.plugin.register("autoupload", function () {
         /* 插入loading的占位符 */
         me.execCommand("inserthtml", loadingHtml);
         /* 判断后端配置是否没有加载成功 */
-        if (!me.getOpt(filetype + "ActionName")) {
+        if (!me.getOpt("uploadServiceEnable") && !me.getOpt(filetype + "ActionName")) {
             errorHandler(me.getLang("autoupload.errorLoadConfig"));
             return;
         }
@@ -94,7 +95,6 @@ UE.plugin.register("autoupload", function () {
         /* 判断文件格式是否超出允许 */
         var fileext = file.name ? file.name.substr(file.name.lastIndexOf(".")) : "";
         if (
-            (fileext && filetype != "image") ||
             (allowFiles &&
                 (allowFiles.join("") + ".").indexOf(fileext.toLowerCase() + ".") == -1)
         ) {
@@ -103,29 +103,11 @@ UE.plugin.register("autoupload", function () {
         }
 
         var upload = function (file) {
-            if(me.getOpt('uploadServiceEnable')){
-                me.getOpt('uploadServiceUpload')('image', file, {
-                    success: function( res ) {
-                        successHandler( res );
-                    },
-                    error: function( err ) {
-                        errorHandler(me.getLang("autoupload.loadError") + ' : ' + err);
-                    },
-                    progress: function( percent ) {
-
-                    }
-                }, {
-                    from: 'paste'
-                });
-                return;
-            }
-            var formData = new FormData();
-            formData.append(fieldName, file, file.name);
-            UE.api.requestAction(me, me.getOpt(filetype + "ActionName"), {
-                data: formData
-            }).then(function (res) {
-                successHandler(me.getOpt('serverResponsePrepare')( res.data ));
+            if (!me.document) return;
+            UE.api.upload(me, me.getOpt(filetype + "ActionName"), fieldName, file, {type: filetype === 'file' ? 'attachment' : filetype, from: from}).then(function (res) {
+                successHandler(res);
             }).catch(function (err) {
+                if (!me.document) return;
                 errorHandler(me.getLang("autoupload.loadError") + ' : ' + err);
             });
         };
@@ -138,47 +120,19 @@ UE.plugin.register("autoupload", function () {
                 maxSizeMB: imageMaxSize / 1024 / 1024,
                 maxWidthOrHeight: imageCompressBorder
             }).then(function (compressedFile) {
+                if (!me.document) return;
                 if (me.options.debug) {
                     console.log('AutoUpload.CompressImage', (compressedFile.size / file.size * 100).toFixed(2) + '%');
                 }
                 upload(compressedFile);
             }).catch(function (err) {
+                if (!me.document) return;
                 console.error('AutoUpload.CompressImage.error', err)
                 upload(file);
             });
         } else {
             upload(file);
         }
-
-        /* 创建Ajax并提交 */
-        // var xhr = new XMLHttpRequest(),
-        //   fd = new FormData(),
-        //   params = utils.serializeParam(me.queryCommandValue("serverparam")) || "",
-        //   url = utils.formatUrl(
-        //     actionUrl + (actionUrl.indexOf("?") == -1 ? "?" : "&") + params
-        //   );
-        //
-        // fd.append(
-        //   fieldName,
-        //   file,
-        //   file.name || "blob." + file.type.substr("image/".length)
-        // );
-        // fd.append("type", "ajax");
-        // xhr.open("post", url, true);
-        // xhr.setRequestHeader("X-Requested-With", "XMLHttpRequest");
-        // xhr.addEventListener("load", function(e) {
-        //   try {
-        //     var json = new Function("return " + utils.trim(e.target.response))();
-        //     if (json.state == "SUCCESS" && json.url) {
-        //       successHandler(json);
-        //     } else {
-        //       errorHandler(json.state);
-        //     }
-        //   } catch (er) {
-        //     errorHandler(me.getLang("autoupload.loadError"));
-        //   }
-        // });
-        // xhr.send(fd);
     }
 
     function getPasteImage(e) {
@@ -211,12 +165,8 @@ UE.plugin.register("autoupload", function () {
                 }
             });
         },
+        defaultOptions: {enableDragUpload: true, enablePasteUpload: true},
         bindEvents: {
-            defaultOptions: {
-                //默认间隔时间
-                enableDragUpload: true,
-                enablePasteUpload: true
-            },
             //插入粘贴板的图片，拖放插入图片
             ready: function (e) {
                 var me = this;
@@ -233,7 +183,7 @@ UE.plugin.register("autoupload", function () {
                                 file = items[len];
                                 if (file.getAsFile) file = file.getAsFile();
                                 if (file && file.size > 0) {
-                                    sendAndInsertFile(file, me);
+                                    sendAndInsertFile(file, me, e.type);
                                     hasImg = true;
                                 }
                             }

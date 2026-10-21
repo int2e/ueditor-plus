@@ -67,13 +67,6 @@
             : "";
     }
 
-    function loadPlugins(me) {
-        //初始化插件
-        for (var pi in UE.plugins) {
-            UE.plugins[pi].call(me);
-        }
-    }
-
     function checkCurLang(I18N) {
         for (var lang in I18N) {
             return lang;
@@ -881,11 +874,11 @@
                     '"/>'
                     : "") +
                 (headHtmlForIE9 ||
-                    me.document.getElementsByTagName("head")[0].innerHTML) +
+                    me.document.getElementsByTagName("head")[0].innerHTML.replace(/<style[^>]*data-ue-embedded-style[^>]*>[\s\S]*?<\/style>/gi, "")) +
                 headHtml.join("\n") +
                 "</head>" +
                 "<body " +
-                (ie && browser.version < 9 ? 'class="view"' : "") +
+                'class="' + utils.unhtml(me.body.className) + '"' +
                 ">" +
                 me.getContent(null, null, true) +
                 "</body></html>"
@@ -1465,6 +1458,7 @@
                     me.queryCommandValue = me.bkqueryCommandValue;
                     delete me.bkqueryCommandValue;
                 }
+                me.fireEvent("editablechanged", true);
                 me.fireEvent("selectionchange");
             }
         },
@@ -1498,7 +1492,7 @@
         setDisabled: function (except) {
             var me = this;
             except = except ? (utils.isArray(except) ? except : [except]) : [];
-            if (me.body.contentEditable == "true") {
+            if (!me.bkqueryCommandState) {
                 if (!me.lastBk) {
                     me.lastBk = me.selection.getRange().createBookmark(true);
                 }
@@ -1517,6 +1511,7 @@
                     }
                     return null;
                 };
+                me.fireEvent("editablechanged", false);
                 me.fireEvent("selectionchange");
             }
         },

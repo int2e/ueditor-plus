@@ -51,7 +51,7 @@
 .edui-default .edui-editor-iframeholder {
     position: relative;
     /*for fix ie6 toolbarmsg under iframe bug. relative -> static */
-    /*_position: static !important;*
+    /*_position: static !important;*/
 }
 
 .edui-default .edui-editor-iframeholder textarea {

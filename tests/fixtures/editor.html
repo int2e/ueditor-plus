@@ -1,0 +1,23 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="/dist/themes/default/css/ueditor.css"></head>
+<body>
+<form id="form"><textarea id="editor" name="content" style="width:720px;height:360px"><h1 class="demo-title">Styled editor</h1><p>Original text</p></textarea></form>
+<script>window.UEDITOR_HOME_URL = '/dist/';</script>
+<script src="/dist/ueditor.config.js"></script>
+<script src="/dist/ueditor.all.js"></script>
+<script src="/dist/lang/zh-cn/zh-cn.js"></script>
+<script>
+window.editor = UE.getEditor('editor', {
+    loadConfigFromServer: false,
+    autoHeightEnabled: false,
+    autoSaveKey: 'browser-editor-draft',
+    initialFrameHeight: 320,
+    contentCss: ['/dist/themes/default/css/content-demo.css'],
+    contentBodyClass: 'ue-preview-demo',
+    contentStyle: 'body { background-color: rgb(250, 250, 250); }',
+    allowDivTransToP: false,
+    toolbars: [['source', 'undo', 'redo', 'simpleupload', 'preview']]
+});
+window.editorReady = new Promise(resolve => editor.ready(resolve));
+</script>
+</body></html>

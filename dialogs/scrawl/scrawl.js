@@ -680,7 +680,7 @@ function exec(scrawlObj) {
                 onsuccess: function (xhr) {
                     if (!scrawlObj.isCancelScrawl) {
                         var responseObj;
-                        responseObj = eval("(" + xhr.responseText + ")");
+                        responseObj = utils.str2json(xhr.responseText);
                         if (responseObj.state === "SUCCESS") {
                             successHandler(responseObj);
                         } else {

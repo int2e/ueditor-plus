@@ -1,0 +1,22 @@
+/* Example content stylesheet: loaded into the editing iframe and both previews. */
+.ue-preview-demo {
+    color: #243247;
+    font-family: Arial, sans-serif;
+}
+
+.ue-preview-demo h1 {
+    color: #1769aa;
+    border-bottom: 2px solid #d7e8f6;
+    padding-bottom: 0.25em;
+}
+
+.ue-preview-demo table {
+    border-collapse: collapse;
+    width: 100%;
+}
+
+.ue-preview-demo td,
+.ue-preview-demo th {
+    border: 1px solid #b8c9d8;
+    padding: 8px;
+}

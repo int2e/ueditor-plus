@@ -197,6 +197,56 @@ function App() {
 export default App;
 ```
 
+## 编辑区样式与源码编辑
+
+### 加载站点已有样式
+
+样式加载在编辑 iframe 内，不影响宿主页和工具栏。可同时加载多个 CSS 文件、补充 CSS 文本，并设置内容根节点的 class：
+
+```js
+const editor = UE.getEditor('editor', {
+    contentCss: ['/assets/article.css', '/assets/components.css'],
+    contentStyle: '.article-preview { max-width: 720px; margin: 0 auto; }',
+    contentBodyClass: 'article-preview',
+    contentStyleFromHTML: true,
+    allowDivTransToP: false
+});
+
+// 可在 ready 前或后调用；未传入的配置保持原值，空数组/空字符串用于清除。
+editor.setContentStyles({
+    css: ['/assets/article-dark.css'],
+    style: '.article-preview { padding: 24px; }',
+    bodyClass: 'article-preview dark'
+}).then(results => console.log(results)); // 每个外部 CSS 的 url 和 loaded/error/cancelled 状态
+
+editor.addListener('contentstyleerror', function (event, url) {
+    console.warn('样式加载失败', url);
+});
+```
+
+- `contentCss` 支持字符串或数组，相对路径以宿主页为基准；CSS 文件里的 `url(...)` 仍按该 CSS 文件的位置解析。
+- `contentStyleFromHTML` 默认为 `true`，内容中的 `<style>`（含 `media`）在可视化编辑时生效，删除、撤销和源码切换会同步。设为 `false` 可保留原先只保存样式、不在编辑区应用的行为。
+- `contentBodyClass` 添加到编辑区和预览的 `body`；依赖 `div` 布局时设置 `allowDivTransToP: false`。样式中依赖的类名/祖先结构仍需与内容匹配。
+- 工具栏预览和 `execCommand('preview')` 弹窗使用同一份配置；旧的 `iframeCssUrl`、`iframeCssUrlsAddition`、`iframeCssStylesAddition` 仍有效。
+- `getContent()` 返回内容片段，不自动嵌入配置的外部 CSS；展示端也要加载同一份 CSS 和内容根节点 class。`getAllHtml()` 包含样式引用与 body class。
+- `getContentStyles()` 可读取当前配置；`contentstylesloaded` 在本次外部 CSS 加载结束时触发，结果中包含失败项。
+
+完整演示 `_examples/completeDemo.html` 和构建后的 `dist/index.html` 包含样式加载、清除和切换按钮。
+
+### 源码编辑器
+
+源码模式集成 CodeMirror 6，提供 HTML/CSS/JavaScript 混合高亮、行号、折行、括号匹配、搜索和 HTML 补全。`Ctrl-Space` 主动补全、`Ctrl/Cmd-F` 搜索、`Tab` 缩进。资源随发布包提供，首次进入源码模式时加载，不依赖 CDN；加载期间或加载失败时仍可用 textarea 编辑，加载成功后保留已输入内容。
+
+依赖锁定在 `package-lock.json`，本次更新核对日期为 2026-10-21：`codemirror` 6.0.2、`@codemirror/view` 6.43.15、`@codemirror/state` 6.7.6、`@codemirror/commands` 6.11.1、`@codemirror/lang-html` 6.4.12。生成源码位于 `_src/vendor/codemirror.js`，离线组件及许可证位于 `third-party/codemirror/`。
+
+`sourceEditor: 'textarea'` 可使用纯文本模式；已有的 `codeMirrorJsUrl` / `codeMirrorCssUrl` 和旧版 `window.CodeMirror` 工厂配置继续支持。源码输入会同步表单和草稿，切回可视化后进入原有撤销记录。
+
+### 配置与插件
+
+`loadConfigFromServer: false` 会直接进入配置就绪状态，适用于本地上传配置或自定义 `uploadServiceUpload`。使用内置上传时仍需配置 `serverUrl`、对应的 `imageActionName` / `fileActionName` 等上传参数。Word 文档中的图片通过同一套异步上传流程处理，支持自定义上传和请求头；上传失败会报告错误，不插入无效图片地址。
+
+`disabledPlugins: ['autoupload', 'autosave']` 可在实例初始化时禁用新旧两类插件；禁用前请确认相关功能依赖，并从工具栏中移除对应按钮。`UE.api.request` 与 `UE.ajax.request` 共用 XHR 传输；Promise 接口保留 `{data, status, headers, config, request}` 响应，支持 `url`、`method`、`params`、`data`、`headers`、`timeout`、`responseType`、`withCredentials`、`signal` 和 `onUploadProgress`，不再内嵌 Axios。
+
 ## 关于Bug反馈与维护
 
 - 众所周知 UEditor 使用的人数多，目前已经累积了N个Bug，开源不易需要大家共同维护
@@ -238,14 +288,23 @@ git clone https://gitee.com/modstart-lib/ueditor-plus.git
 
 ### 第二步，开始功能开发
 
-使用浏览器打开 `_examples/index.html` 页面相关内容，完成功能开发
+通过本地 HTTP 服务访问 `_examples/index.html`，完成功能开发。构建环境使用 Node.js 24（`.nvmrc`），最低要求 Node.js 22；浏览器面向现代 Chromium、Firefox 和 Safari，旧 IE 不在本次组件升级的支持范围内。
 
 ### 第三步，打包
 
 ```shell
-npm install
-grunt default
+npm ci
+npm run build
+npm test
+npx playwright install chromium webkit
+npm run test:browser
 ```
+
+`npm run build` 输出完整的 `dist/` 与压缩的 `dist-min/`，构建错误会以非零状态退出。`grunt default` 仍可作为兼容入口。资源版本号根据最终文件内容计算。
+
+`npm run build:lite` 输出相同目录的轻量包，省去 AI、Word 导入对话框及其 Vue/showdown 资源，并移除默认工具栏入口；源码编辑和样式加载仍保留。轻量包不能使用 `ai` / `contentimport` 自定义入口，发布前按需要重新运行完整或轻量构建。
+
+测试覆盖配置就绪、请求/上传、SSE 分片与错误处理，以及 Chromium 完整包和 WebKit 压缩包的源码编辑、样式、预览、上传与销毁流程；上传和 AI 使用模拟响应，不连接实际业务后端。
 
 ## UEditor相关链接
 

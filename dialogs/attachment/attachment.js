@@ -152,7 +152,7 @@
             if (!WebUploader.Uploader.support()) {
                 $('#filePickerReady').after($('<div>').html(lang.errorNotSupport)).hide();
                 return;
-            } else if (!editor.getOpt('fileActionName')) {
+            } else if (!editor.getOpt('uploadServiceEnable') && !editor.getOpt('fileActionName')) {
                 $('#filePickerReady').after($('<div>').html(lang.errorLoadConfig)).hide();
                 return;
             }
@@ -171,21 +171,7 @@
                 compress: false
             };
             if(editor.getOpt('uploadServiceEnable')) {
-                uploaderOption.customUpload = function (file, callback) {
-                    editor.getOpt('uploadServiceUpload')('attachment', file, {
-                        success: function( res ) {
-                            callback.onSuccess(file, {_raw:JSON.stringify(res)});
-                        },
-                        error: function( err ) {
-                            callback.onError(file, err);
-                        },
-                        progress: function( percent ) {
-                            callback.onProgress(file, percent);
-                        }
-                    }, {
-                        from: 'attachment'
-                    });
-                };
+                uploaderOption.customUpload = UE.api.customUploader(editor, 'attachment', 'attachment');
             }
 
 
@@ -533,9 +519,7 @@
             uploader.on('uploadSuccess', function (file, ret) {
                 var $file = $('#' + file.id);
                 try {
-                    var responseText = (ret._raw || ret),
-                        json = utils.str2json(responseText);
-                    json = editor.getOpt('serverResponsePrepare')(json);
+                    var json = UE.api.parseResponse(editor, ret);
                     if (json.state == 'SUCCESS') {
                         _this.fileList.push(json);
                         $file.append('<span class="success"></span>');
@@ -682,7 +666,7 @@
                     method: 'get',
                     onsuccess: function (r) {
                         try {
-                            var json = eval('(' + r.responseText + ')');
+                            var json = utils.str2json(r.responseText);
                             if (json.state == 'SUCCESS') {
                                 _this.pushData(json.list);
                                 _this.listIndex = parseInt(json.start) + parseInt(json.list.length);

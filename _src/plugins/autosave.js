@@ -12,7 +12,7 @@ UE.plugin.register("autosave", function () {
 
         editor._autoSaveTimer = null;
 
-        saveData = me.body.innerHTML;
+        saveData = me.queryCommandState('source') === 1 ? me.getContent() : me.body.innerHTML;
 
         if (
             editor.fireEvent("beforeautosave", {
@@ -37,6 +37,7 @@ UE.plugin.register("autosave", function () {
             autoSaveKey: null,
         },
         bindEvents: {
+            destroy: function () { window.clearTimeout(me._autoSaveTimer); },
             ready: function () {
                 saveKey = me.getOpt('autoSaveKey');
                 if (!saveKey) {
@@ -56,7 +57,7 @@ UE.plugin.register("autosave", function () {
                     var data = me.getPreferences(saveKey);
                     // console.log('saveKey', saveKey, data);
                     if (data) {
-                        me.body.innerHTML = data;
+                        me.setContent(data);
                         me.fireEvent('showmessage', {
                             type: 'info',
                             content: me.getLang('autosave').autoRestoreTip
@@ -118,8 +119,7 @@ UE.plugin.register("autosave", function () {
             auto_save_restore: {
                 execCommand: function (cmd, name) {
                     if (saveKey) {
-                        me.body.innerHTML =
-                            me.getPreferences(saveKey) || "<p>" + domUtils.fillHtml + "</p>";
+                        me.setContent(me.getPreferences(saveKey) || "<p>" + domUtils.fillHtml + "</p>");
                         me.focus(true);
                     }
                 },

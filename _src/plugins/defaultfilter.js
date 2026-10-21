@@ -49,6 +49,7 @@ UE.plugins["defaultfilter"] = function () {
                         node.setAttr({
                             cdata_tag: node.tagName,
                             cdata_data: node.innerHTML() || "",
+                            cdata_media: node.getAttr("media") || "",
                             _ue_custom_node_: "true"
                         });
                         node.tagName = "div";
@@ -221,8 +222,10 @@ UE.plugins["defaultfilter"] = function () {
                             node.tagName = val;
                             node.appendChild(UE.uNode.createText(node.getAttr("cdata_data")));
                             node.setAttr({
+                                media: node.getAttr("cdata_media") || "",
                                 cdata_tag: "",
                                 cdata_data: "",
+                                cdata_media: "",
                                 _ue_custom_node_: ""
                             });
                         }

@@ -10,10 +10,11 @@ UE.plugin.register("simpleupload", function () {
         containerBtn;
 
     function initUploadBtn() {
+        if (isLoaded || !me.options) return;
         var input = document.createElement("input");
         input.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;cursor:pointer;font-size:0;opacity:0;';
         input.type = 'file';
-        input.accept = me.getOpt('imageAllowFiles').join(',');
+        input.accept = (me.getOpt('imageAllowFiles') || []).join(',') || 'image/*';
         containerBtn.appendChild(input);
         domUtils.on(input, 'click', function (e) {
             var toolbarCallback = me.getOpt("toolbarCallback");
@@ -27,6 +28,7 @@ UE.plugin.register("simpleupload", function () {
         domUtils.on(input, 'change', function (e) {
             var state = me.queryCommandState("simpleupload");
             if (state === -1) {
+                input.value = '';
                 return;
             }
             if (!input.value) {
@@ -35,9 +37,10 @@ UE.plugin.register("simpleupload", function () {
 
             var loadingId = UE.dialog.loadingPlaceholder(me);
 
-            if (!me.getOpt("imageActionName")) {
+            if (!me.getOpt("uploadServiceEnable") && !me.getOpt("imageActionName")) {
                 UE.dialog.removeLoadingPlaceholder(me, loadingId);
                 UE.dialog.tipError(me, me.getLang("autoupload.errorLoadConfig"));
+                input.value = '';
                 return;
             }
 
@@ -50,17 +53,20 @@ UE.plugin.register("simpleupload", function () {
             ) {
                 UE.dialog.removeLoadingPlaceholder(me, loadingId);
                 UE.dialog.tipError(me, me.getLang("autoupload.exceedTypeError"));
+                input.value = '';
                 return;
             }
 
             var successHandler = function (res) {
-                const loader = me.document.getElementById(loadingId);
+                const loader = me.document && me.document.getElementById(loadingId);
+                if (!loader) { input.value = ''; return; }
                 domUtils.removeClasses(loader, "uep-loading");
-                const link = me.options.imageUrlPrefix + res.url;
+                const link = (me.options.imageUrlPrefix || '') + res.url;
                 loader.setAttribute("src", link);
                 loader.setAttribute("_src", link);
                 loader.setAttribute("alt", res.original || "");
                 loader.removeAttribute("id");
+                input.value = '';
                 me.fireEvent("contentchange");
                 // 触发上传图片事件
                 me.fireEvent("uploadsuccess", {
@@ -70,43 +76,17 @@ UE.plugin.register("simpleupload", function () {
             };
 
             var errorHandler = function (err) {
+                if (!me.document) return;
                 UE.dialog.removeLoadingPlaceholder(me, loadingId);
                 UE.dialog.tipError(me, err);
+                input.value = '';
             };
 
             var upload = function (file) {
-                if(me.getOpt('uploadServiceEnable')){
-                    me.getOpt('uploadServiceUpload')('image', file, {
-                        success: function( res ) {
-                            successHandler( res );
-                        },
-                        error: function( err ) {
-                            errorHandler(me.getLang("simpleupload.loadError") + ' : ' + err);
-                        },
-                        progress: function( percent ) {
-
-                        }
-                    }, {
-                        from: 'upload'
-                    });
-                    return;
-                }
-                const formData = new FormData();
-                formData.append(me.getOpt('imageFieldName'), file, file.name);
-                UE.api.requestAction(me, me.getOpt("imageActionName"), {
-                    data: formData
-                }).then(function (res) {
-                    res = me.getOpt('serverResponsePrepare')( res.data )
-                    if ('SUCCESS' === res.state && res.url) {
-                        successHandler(res)
-                    } else {
-                        errorHandler(res.state);
-                    }
-                    input.value = '';
-                }).catch(function (err) {
-                    errorHandler(err)
-                    input.value = '';
-                });
+                if (!me.document) return;
+                UE.api.upload(me, me.getOpt("imageActionName"), me.getOpt('imageFieldName'), file, {type: 'image', from: 'upload'})
+                    .then(successHandler)
+                    .catch(function (err) { errorHandler(err.message || err); });
             };
             var file = input.files[0];
             var fileExt = UE.plus.fileExt(file.name);
@@ -119,11 +99,13 @@ UE.plugin.register("simpleupload", function () {
                     maxSizeMB: imageMaxSize / 1024 / 1024,
                     maxWidthOrHeight: imageCompressBorder
                 }).then(function (compressedFile) {
+                    if (!me.document) return;
                     if (me.options.debug) {
                         console.log('UEditorPlus.SimpleUpload.CompressImage', (compressedFile.size / file.size * 100).toFixed(2) + '%');
                     }
                     upload(compressedFile);
                 }).catch(function (err) {
+                    if (!me.document) return;
                     console.error('UEditorPlus.SimpleUpload.CompressImage.error', err);
                     upload(file);
                 });
@@ -144,6 +126,7 @@ UE.plugin.register("simpleupload", function () {
                 }
             }, 400);
         });
+        me.addListener('destroy', function () { clearTimeout(stateTimer); });
         isLoaded = true;
     }
 

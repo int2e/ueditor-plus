@@ -1,61 +1,46 @@
-const fs = require('fs');
-const path = require('path');
-const md5File = require('md5-file');
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const crypto = require('node:crypto');
 
-const timestamp = parseInt((new Date().getTime()) / 1000);
-
-// replace js,html,css file content {timestamp} to current timestamp in dist/ and dist-min/
-function replacePlaceholderFile(filePath) {
-    let content = fs.readFileSync(filePath, 'utf8');
-    let changed = false;
-    content = content.replace(/['"]([^'"]+)\?\{timestamp:?.*?\}['"]/g,
-        function (match, contents, offset, input_string) {
-            let fileTimestampPath = path.join(path.dirname(filePath), contents);
-            if (fileTimestampPath.indexOf('/~/') >= 0) {
-                fileTimestampPath = fileTimestampPath.replace('/~/', '/');
+module.exports = async function postBuild(dir, options = {}) {
+    const done = new Set();
+    const visiting = new Set();
+    const textFile = /\.(js|html|css|json)$/;
+    async function resolve(file) {
+        if (done.has(file) || !textFile.test(file)) return;
+        if (visiting.has(file)) throw new Error('Circular asset reference: ' + file);
+        visiting.add(file);
+        let content = await fs.readFile(file, 'utf8');
+        const matches = [...content.matchAll(/['"]([^'"\n]+)\?\{timestamp(?::([^}]+))?\}['"]/g)];
+        for (const match of matches) {
+            const asset = match[1].replace(/^~\//, '');
+            const candidates = [path.resolve(path.dirname(file), asset), path.resolve(dir, asset)];
+            if (match[2]) candidates.push(path.resolve(dir, match[2].replace(/^dist(?:-min)?\//, '')));
+            let target;
+            for (const candidate of candidates) {
+                if (await fs.stat(candidate).then(stat => stat.isFile(), () => false)) { target = candidate; break; }
             }
-            if (!fs.existsSync(fileTimestampPath)) {
-                const mat = /{timestamp:(.*?)\}/.exec(match);
-                if (mat) {
-                    fileTimestampPath = mat[1];
+            if (!target) {
+                if (!(options.excluded || []).some(ex => asset.startsWith(ex))) {
+                    throw new Error(`Missing asset ${match[1]} referenced by ${file}`);
                 }
+                content = content.replace(match[0], match[0].replace(/\{timestamp(?::[^}]+)?\}/, options.version));
+                continue;
             }
-            if (!fs.existsSync(fileTimestampPath)) {
-                console.log('not exists', fileTimestampPath, match);
-                return match;
-            }
-            let timestamp = md5File.sync(fileTimestampPath).substr(0, 8);
-            changed = true;
-            contents = match.replace(/\{timestamp:?.*?\}/g, timestamp);
-            console.log('replace', match, fileTimestampPath, timestamp);
-            return contents;
-        });
-    if (changed) {
-        console.log('update', filePath)
-        fs.writeFileSync(filePath, content);
-    }
-}
-
-function replacePlaceholderInDir(dir) {
-    const files = fs.readdirSync(dir);
-    files.forEach(file => {
-        const filePath = dir + file;
-        const stat = fs.statSync(filePath);
-        if (stat.isFile()) {
-            replacePlaceholderFile(filePath);
-        } else if (stat.isDirectory()) {
-            replacePlaceholderInDir(filePath + '/');
+            await resolve(target);
+            const hash = crypto.createHash('sha256').update(await fs.readFile(target)).digest('hex').slice(0, 10);
+            content = content.replace(match[0], match[0].replace(/\{timestamp(?::[^}]+)?\}/, hash));
         }
-    });
-}
-
-function replacePlaceholder(dirs) {
-    dirs.forEach(dir => {
-        replacePlaceholderInDir(dir);
-    });
-}
-
-replacePlaceholder([
-    'dist/',
-    'dist-min/',
-]);
+        await fs.writeFile(file, content);
+        visiting.delete(file);
+        done.add(file);
+    }
+    async function walk(current) {
+        for (const item of await fs.readdir(current, {withFileTypes: true})) {
+            const file = path.join(current, item.name);
+            if (item.isDirectory()) await walk(file);
+            else await resolve(file);
+        }
+    }
+    await walk(dir);
+};

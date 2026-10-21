@@ -62,7 +62,7 @@ UE.plugins["catchremoteimage"] = function () {
                 try {
                     var info = r.state !== undefined
                         ? r
-                        : eval("(" + r.responseText + ")");
+                        : utils.str2json(r.responseText);
                 } catch (e) {
                     return;
                 }

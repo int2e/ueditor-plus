@@ -197,3 +197,7 @@ pip-log.txt
 .github/ISSUE_TEMPLATE/
 /AGENTS.md
 /openspec/
+
+/test-results/
+/playwright-report/
+!tests/fixtures/with-image.docx

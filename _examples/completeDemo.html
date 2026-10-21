@@ -89,6 +89,12 @@
     </div>
     <div id="btns" style="margin-top:20px;height:2000px;">
         <div>
+            编辑区样式：
+            <button onclick="ue.setContentStyles({css: [UEDITOR_CONFIG.UEDITOR_HOME_URL + 'themes/default/css/content-demo.css'], style: '', bodyClass: 'ue-preview-demo'})">加载文章样式</button>
+            <button onclick="ue.setContentStyles({style: '.ue-preview-demo { background: #172033; color: #e2e8f0; } .ue-preview-demo h1 { color: #93c5fd; }'})">切换深色样式</button>
+            <button onclick="ue.setContentStyles({css: [], style: '', bodyClass: ''})">清除内容样式</button>
+        </div>
+        <div>
 
             <button onclick="alert(UE.getEditor('editor').getAllHtml())">获得整个html的内容</button>
             <button onclick="alert(UE.getEditor('editor').getContent())">获得内容</button>
@@ -120,6 +126,9 @@
 
     <script type="text/javascript">
         var ue = UE.getEditor('editor',{
+            contentCss: [UEDITOR_CONFIG.UEDITOR_HOME_URL + 'themes/default/css/content-demo.css'],
+            contentBodyClass: 'ue-preview-demo',
+            allowDivTransToP: false,
             // autoHeightEnabled: false,
             // retainOnlyLabelPasted: true,
             ai:{

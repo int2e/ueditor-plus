@@ -8,37 +8,18 @@ contentImport.init = function (opt, callbacks) {
     addUploadButtonListener();
     addOkListener();
 };
-function upload (blob) {
-     /* 创建Ajax并提交 
-        暂时采用同步方式
-        异步的话，可以自行参考 ueditor.all.js 23031开始 进行修改
-         */
-     var xhr = new XMLHttpRequest()
-     var fd = new FormData()
-
-     var url =  editor.getOpt('imageUrlPrefix')
-    var actionUrl = editor.getActionUrl(editor.getOpt('imageActionName'))
-    var type = 'png'
-    if (blob.type) {
-        type = blob.type.substr('image/'.length)
-    }
-    fd.append('upfile', blob, blob.name || ('blob.' + type))
-    fd.append('type', 'ajax')
-    xhr.open('post', actionUrl, false)
-    xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest')
-
-    xhr.send(fd)
-    if (xhr.status == 200) {
-        var json = (new Function('return ' + xhr.responseText))()
-        if (json.state == 'SUCCESS' && json.url) {
-            return url + json.url
-        } else {
-            return blob
-        }
-    }
-
+function upload(blob) {
+    var type = (blob.type || 'image/png').split('/')[1];
+    var file = new File([blob], blob.name || 'blob.' + type, {type: blob.type});
+    return UE.api.upload(editor, editor.getOpt('imageActionName'), editor.getOpt('imageFieldName'), file, {
+        type: 'image', from: 'contentimport'
+    }).then(function (result) {
+        return (editor.getOpt('imageUrlPrefix') || '') + result.url;
+    });
 }
 function processWord(file) {
+    var imageUploadError;
+    contentImport.data.result = null;
     $('.file-tip').html('正在转换Word文件，请稍后...');
     $('.file-result').html('').hide();
     var reader = new FileReader();
@@ -48,25 +29,22 @@ function processWord(file) {
         }, {
             convertImage: mammoth.images.imgElement(function (image) {
                 return image.readAsArrayBuffer().then(function (imageBuffer) {
-                    // 创建blob URL而不是base64
-
-                    const blob = new Blob([imageBuffer], { type: image.contentType })
-                    const url = upload(blob)
-                   //若是只要展示 直接blob形式就可以，采用下面这行
-                    // const url = URL.createObjectURL(blob)
-
-                    return {
-                        src: url,
-                        alt: '文档图片'
-                    }
+                    return upload(new Blob([imageBuffer], {type: image.contentType}));
+                }).then(function (url) {
+                    return {src: url, alt: '文档图片'};
+                }).catch(function (error) {
+                    // Mammoth collects image errors as warnings; keep this import from silently losing images.
+                    imageUploadError = error;
+                    throw error;
                 })
             })
         })
             .then(function displayResult(result) {
+                if (imageUploadError) throw imageUploadError;
                 $('.file-tip').html('转换成功');
                 contentImport.data.result = result.value;
                 $('.file-result').html(result.value).show();
-            }, function (error) {
+            }).catch(function (error) {
                 $('.file-tip').html('Word文件转换失败:' + error);
             });
     };
@@ -85,6 +63,7 @@ function processMarkdown( markdown ){
 }
 
 function processMarkdownFile(file) {
+    contentImport.data.result = null;
     $('.file-tip').html('正在转换Markdown文件，请稍后...');
     $('.file-result').html('').hide();
     var reader = new FileReader();
@@ -100,6 +79,7 @@ function processMarkdownFile(file) {
 function addUploadButtonListener() {
     g('contentImport').addEventListener('change', function () {
         const file = this.files[0];
+        if (!file) return;
         const fileName = file.name;
         const fileExt = fileName.substring(fileName.lastIndexOf('.') + 1).toLowerCase();
         switch (fileExt) {

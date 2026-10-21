@@ -5,6 +5,25 @@
  */
 
 (function () {
+    var loads = {};
+    function loadCodeMirror(opt) {
+        var src = opt.codeMirrorJsUrl || opt.UEDITOR_HOME_URL + "third-party/codemirror/codemirror.js?{timestamp}";
+        if (!loads[src]) {
+            loads[src] = new Promise(function (resolve, reject) {
+                var script = document.createElement('script');
+                script.src = src;
+                script.onload = function () {
+                    var factory = opt.codeMirrorJsUrl && window.CodeMirror ||
+                        window.UECodeMirror && window.UECodeMirror.create || window.CodeMirror;
+                    if (factory) resolve(factory);
+                    else { delete loads[src]; reject(new Error('Source editor component is unavailable')); }
+                };
+                script.onerror = function () { script.remove(); delete loads[src]; reject(new Error('Unable to load ' + src)); };
+                document.head.appendChild(script);
+            });
+        }
+        return loads[src];
+    }
     var sourceEditors = {
         textarea: function (editor, holder) {
             var textarea = holder.ownerDocument.createElement("textarea");
@@ -20,12 +39,17 @@
                 };
             }
             holder.appendChild(textarea);
+            textarea.setAttribute('aria-label', 'HTML source');
+            textarea.oninput = function () { editor.sync(); editor.fireEvent('contentchange'); };
             return {
                 setContent: function (content) {
                     textarea.value = content;
                 },
                 getContent: function () {
                     return textarea.value;
+                },
+                setReadOnly: function (value) {
+                    textarea.readOnly = value;
                 },
                 select: function () {
                     var range;
@@ -54,13 +78,17 @@
                 }
             };
         },
-        codemirror: function (editor, holder) {
-            var codeEditor = window.CodeMirror(holder, {
+        codemirror: function (editor, holder, factory) {
+            var muted = false;
+            var readOnly = !!editor.bkqueryCommandState;
+            var codeEditor = factory(holder, {
                 mode: "text/html",
                 tabMode: "indent",
                 lineNumbers: true,
                 lineWrapping: true,
+                readOnly: readOnly,
                 onChange: function (v) {
+                    if (muted) return;
                     editor.sync();
                     editor.fireEvent("contentchange");
                     // console.log('CodeMirror.onChange',v.getValue());
@@ -70,24 +98,33 @@
             var dom = codeEditor.getWrapperElement();
             dom.style.cssText =
                 'position:absolute;left:0;top:0;width:100%;height:100%;font-family:consolas,"Courier new",monospace;font-size:13px;';
-            codeEditor.getScrollerElement().style.cssText =
-                "position:absolute;left:0;top:0;width:100%;height:100%;";
+            if (!codeEditor.view) {
+                codeEditor.getScrollerElement().style.cssText =
+                    "position:absolute;left:0;top:0;width:100%;height:100%;";
+            }
             codeEditor.refresh();
             return {
                 getCodeMirror: function () {
                     return codeEditor;
                 },
                 setContent: function (content) {
+                    muted = true;
                     codeEditor.setValue(content);
+                    muted = false;
                 },
                 getContent: function () {
                     return codeEditor.getValue();
+                },
+                setReadOnly: function (value) {
+                    readOnly = value;
+                    codeEditor.setOption('readOnly', value);
                 },
                 select: function () {
                     codeEditor.focus();
                 },
                 dispose: function () {
-                    holder.removeChild(dom);
+                    if (codeEditor.destroy) codeEditor.destroy();
+                    if (dom.parentNode) dom.parentNode.removeChild(dom);
                     dom = null;
                     codeEditor = null;
                 },
@@ -95,10 +132,11 @@
                     codeEditor.focus();
                 },
                 blur: function () {
+                    if (codeEditor.blur) { codeEditor.blur(); return; }
                     // codeEditor.blur();
                     // since codemirror not support blur()
                     codeEditor.setOption('readOnly', true);
-                    codeEditor.setOption('readOnly', false);
+                    codeEditor.setOption('readOnly', readOnly);
                 }
             };
         }
@@ -112,6 +150,9 @@
         var orgSetContent;
         var orgFocus;
         var orgBlur;
+        var orgHasContents;
+        var destroyed = false;
+        var generation = 0;
         opt.sourceEditor = browser.ie
             ? "textarea"
             : opt.sourceEditor || "codemirror";
@@ -120,12 +161,12 @@
             sourceEditorFirst: false
         });
 
+        var sourceFactory = opt.codeMirrorJsUrl ? window.CodeMirror :
+            window.UECodeMirror && window.UECodeMirror.create || window.CodeMirror;
         function createSourceEditor(holder) {
-            return sourceEditors[
-                opt.sourceEditor == "codemirror" && window.CodeMirror
-                    ? "codemirror"
-                    : "textarea"
-                ](me, holder);
+            var editor = sourceEditors[opt.sourceEditor === 'codemirror' && sourceFactory ? 'codemirror' : 'textarea'](me, holder, sourceFactory);
+            editor.setReadOnly(!!me.bkqueryCommandState);
+            return editor;
         }
 
         var bakCssText;
@@ -159,6 +200,12 @@
             execCommand: function () {
                 sourceMode = !sourceMode;
                 if (sourceMode) {
+                    if (opt.sourceEditor === 'codemirror') {
+                        utils.loadFile(document, {
+                            tag: 'link', rel: 'stylesheet', type: 'text/css',
+                            href: opt.codeMirrorCssUrl || opt.UEDITOR_HOME_URL + 'third-party/codemirror/codemirror.css?{timestamp}'
+                        });
+                    }
                     bakAddress = me.selection.getRange().createAddress(false, true);
                     me.undoManger && me.undoManger.save(true);
                     if (browser.gecko) {
@@ -200,32 +247,42 @@
 
                     orgSetContent = me.setContent;
 
-                    me.setContent = function (html) {
-                        //这里暂时不触发事件，防止报错
-                        var root = UE.htmlparser(html);
-                        me.filterInputRule(root);
-                        html = root.toHtml();
-                        sourceEditor.setContent(html);
+                    me.setContent = function (html, append) {
+                        sourceEditor.setContent((append ? sourceEditor.getContent() : '') + (html || ''));
+                        me.sync();
+                        me.fireEvent('contentchange');
                     };
 
+                    var currentGeneration = ++generation;
                     setTimeout(function () {
-                        sourceEditor.select();
-                        me.addListener("fullscreenchanged", function () {
-                            try {
-                                sourceEditor.getCodeMirror().refresh();
-                            } catch (e) {
-                            }
-                        });
+                        if (!destroyed && sourceMode && generation === currentGeneration) sourceEditor.select();
                     });
+                    if (opt.sourceEditor === 'codemirror' && !sourceFactory) {
+                        loadCodeMirror(opt).then(function (factory) {
+                            sourceFactory = factory;
+                            if (destroyed || !sourceMode || generation !== currentGeneration) return;
+                            var value = sourceEditor.getContent();
+                            var upgraded = createSourceEditor(me.iframe.parentNode);
+                            upgraded.setContent(value);
+                            sourceEditor.dispose();
+                            sourceEditor = upgraded;
+                            sourceEditor.focus();
+                            me.fireEvent('sourceeditorready');
+                        }).catch(function (error) {
+                            if (!destroyed) me.fireEvent('sourceeditorerror', error);
+                        });
+                    }
 
                     //重置getContent，源码模式下取值也能是最新的数据
                     oldGetContent = me.getContent;
+                    orgHasContents = me.hasContents;
                     me.getContent = function () {
                         return (
                             sourceEditor.getContent() ||
                             "<p>" + (browser.ie ? "" : "<br/>") + "</p>"
                         );
                     };
+                    me.hasContents = function () { return !!sourceEditor.getContent(); };
 
                     orgFocus = me.focus;
                     orgBlur = me.blur;
@@ -255,15 +312,13 @@
                     );
 
                     me.setContent = orgSetContent;
-
+                    me.getContent = oldGetContent;
+                    me.focus = orgFocus;
+                    me.blur = orgBlur;
+                    me.hasContents = orgHasContents;
                     me.setContent(cont);
                     sourceEditor.dispose();
                     sourceEditor = null;
-                    //还原getContent方法
-                    me.getContent = oldGetContent;
-
-                    me.focus = orgFocus;
-                    me.blur = orgBlur;
 
                     var first = me.body.firstChild;
                     //trace:1106 都删除空了，下边会报错，所以补充一个p占位
@@ -284,11 +339,14 @@
 
                         me.body.contentEditable = false;
                         setTimeout(function () {
+                            if (destroyed) { domUtils.remove(input); return; }
                             domUtils.setViewportOffset(input, {left: -32768, top: 0});
                             input.focus();
                             setTimeout(function () {
-                                me.body.contentEditable = true;
-                                me.selection.getRange().moveToAddress(bakAddress).select(true);
+                                if (!destroyed) {
+                                    me.body.contentEditable = !me.bkqueryCommandState;
+                                    me.selection.getRange().moveToAddress(bakAddress).select(true);
+                                }
                                 domUtils.remove(input);
                             });
                         });
@@ -324,35 +382,24 @@
             return oldQueryCommandState.apply(this, arguments);
         };
 
-        if (opt.sourceEditor == "codemirror") {
-            me.addListener("ready", function () {
-                utils.loadFile(
-                    document,
-                    {
-                        src:
-                            opt.codeMirrorJsUrl ||
-                            opt.UEDITOR_HOME_URL + "third-party/codemirror/codemirror.js",
-                        tag: "script",
-                        type: "text/javascript",
-                        defer: "defer"
-                    },
-                    function () {
-                        if (opt.sourceEditorFirst) {
-                            setTimeout(function () {
-                                me.execCommand("source");
-                            }, 0);
-                        }
-                    }
-                );
-                utils.loadFile(document, {
-                    tag: "link",
-                    rel: "stylesheet",
-                    type: "text/css",
-                    href:
-                        opt.codeMirrorCssUrl ||
-                        opt.UEDITOR_HOME_URL + "third-party/codemirror/codemirror.css?221123"
-                });
-            });
-        }
+        me.addListener('editablechanged', function (event, editable) {
+            if (sourceEditor) sourceEditor.setReadOnly(!editable);
+        });
+        me.addListener('fullscreenchanged', function () {
+            if (sourceEditor && sourceEditor.getCodeMirror) sourceEditor.getCodeMirror().refresh();
+        });
+        me.addListener('destroy', function () {
+            destroyed = true;
+            if (sourceEditor) {
+                var content = sourceEditor.getContent();
+                sourceEditor.dispose();
+                sourceEditor = null;
+                // Editor.destroy reads the current content after the destroy event.
+                me.getContent = function () { return content; };
+            }
+        });
+        me.addListener('ready', function () {
+            if (opt.sourceEditorFirst) me.execCommand('source');
+        });
     };
 })();

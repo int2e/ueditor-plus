@@ -406,7 +406,7 @@
             if (!WebUploader.Uploader.support()) {
                 $('#filePickerReady').after($('<div>').html(lang.errorNotSupport)).hide();
                 return;
-            } else if (!editor.getOpt('imageActionName')) {
+            } else if (!editor.getOpt('uploadServiceEnable') && !editor.getOpt('imageActionName')) {
                 $('#filePickerReady').after($('<div>').html(lang.errorLoadConfig)).hide();
                 return;
             }
@@ -435,21 +435,7 @@
                 } : false
             };
             if(editor.getOpt('uploadServiceEnable')) {
-                uploaderOption.customUpload = function (file, callback) {
-                    editor.getOpt('uploadServiceUpload')('image', file, {
-                        success: function( res ) {
-                            callback.onSuccess(file, {_raw:JSON.stringify(res)});
-                        },
-                        error: function( err ) {
-                            callback.onError(file, err);
-                        },
-                        progress: function( percent ) {
-                            callback.onProgress(file, percent);
-                        }
-                    }, {
-                        from: 'image'
-                    });
-                };
+                uploaderOption.customUpload = UE.api.customUploader(editor, 'image', 'image');
             }
 
             uploader = _this.uploader = WebUploader.create(uploaderOption);
@@ -789,9 +775,7 @@
             uploader.on('uploadSuccess', function (file, ret) {
                 var $file = $('#' + file.id);
                 try {
-                    var responseText = (ret._raw || ret),
-                        json = utils.str2json(responseText);
-                    json = editor.options.serverResponsePrepare(json);
+                    var json = UE.api.parseResponse(editor, ret);
                     if (json.state == 'SUCCESS') {
                         _this.imageList.push(json);
                         $file.append('<span class="success"></span>');
@@ -950,7 +934,7 @@
                     'method': 'get',
                     'onsuccess': function (r) {
                         try {
-                            var json = isJsonp ? r : eval('(' + r.responseText + ')');
+                            var json = isJsonp ? r : utils.str2json(r.responseText);
                             json = editor.options.serverResponsePrepare(json);
                             if (json.state === 'SUCCESS') {
                                 _this.pushData(json.list);

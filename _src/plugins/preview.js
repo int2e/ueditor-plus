@@ -16,21 +16,18 @@
  */
 UE.commands["preview"] = {
     execCommand: function () {
-        var w = window.open("", "_blank", ""),
-            d = w.document;
+        var w = window.open("", "_blank", "");
+        if (!w) return;
+        var d = w.document;
+        var rootPath = new URL(this.options.UEDITOR_HOME_URL, document.baseURI).href;
         d.open();
-        d.write(
-            '<!DOCTYPE html><html><head><meta charset="utf-8"/><script src="' +
-            this.options.UEDITOR_HOME_URL +
-            'ueditor.parse.js"></script><script>' +
-            "setTimeout(function(){uParse('div',{rootPath: '" +
-            this.options.UEDITOR_HOME_URL +
-            "'})},300)" +
-            "</script></head><body><div>" +
-            this.getContent(null, null, true) +
-            "</div></body></html>"
-        );
+        d.write('<!DOCTYPE html><html><head><meta charset="utf-8"/></head><body class="view"></body></html>');
         d.close();
+        d.body.innerHTML = this.getContent(null, null, true);
+        this.applyContentStylesTo(d);
+        utils.loadFile(d, {tag: 'script', src: rootPath + 'ueditor.parse.js'}, function () {
+            w.uParse('body', {rootPath: rootPath});
+        });
     },
     notNeedUndo: 1
 };

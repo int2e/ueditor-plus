@@ -21,9 +21,10 @@ UE.plugin = (function () {
             };
         },
         load: function (editor) {
-            utils.each(_plugins, function (plugin) {
-                var _export = plugin.execFn.call(editor);
-                if (editor.options[plugin.optionName] !== false) {
+            utils.each(_plugins, function (plugin, name) {
+                var disabled = (editor.options.disabledPlugins || []).indexOf(name) >= 0 || editor.options[plugin.optionName] === false;
+                if (!disabled) {
+                    var _export = plugin.execFn.call(editor);
                     if (_export) {
                         //后边需要再做扩展
                         utils.each(_export, function (v, k) {
@@ -65,14 +66,14 @@ UE.plugin = (function () {
                 }
             });
             //向下兼容
-            utils.each(UE.plugins, function (plugin) {
-                plugin.call(editor);
+            utils.each(UE.plugins, function (plugin, name) {
+                if ((editor.options.disabledPlugins || []).indexOf(name) < 0) plugin.call(editor);
             });
         },
         run: function (pluginName, editor) {
             var plugin = _plugins[pluginName];
             if (plugin) {
-                plugin.exeFn.call(editor);
+                plugin.execFn.call(editor);
             }
         }
     };

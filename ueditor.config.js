@@ -63,6 +63,13 @@
             return res;
         },
 
+        // 编辑区与预览加载的站点样式；相对路径以宿主页为基准，不影响工具栏。
+        // contentCss: ['/assets/article.css'],
+        // contentStyle: '.article { max-width: 720px; margin: 0 auto; }',
+        // contentBodyClass: 'article',
+        // contentStyleFromHTML: true,
+        // disabledPlugins: ['autoupload'],
+
         //工具栏上的所有的功能按钮和下拉框，可以在new编辑器的实例时选择自己需要的重新定义
         toolbars: [
             [

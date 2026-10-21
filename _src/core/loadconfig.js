@@ -1,9 +1,16 @@
 (function () {
     UE.Editor.prototype.loadServerConfig = function () {
         var me = this;
+        function finishConfig() {
+            if (!me.options) return;
+            me._serverConfigLoaded = true;
+            me.fireEvent("serverConfigLoaded");
+        }
         setTimeout(function () {
+            if (!me.options) return;
 
             if(me.options.loadConfigFromServer===false){
+                finishConfig();
                 return;
             }
 
@@ -23,26 +30,27 @@
                 /* 发出ajax请求 */
                 me._serverConfigLoaded = false;
 
-                configUrl &&
+                if (!configUrl) {
+                    finishConfig();
+                    return;
+                }
                 UE.ajax.request(configUrl, {
                     method: "GET",
-                    dataType: isJsonp ? "jsonp" : "",
+                    dataType: isJsonp && !(me.options.serverHeaders && Object.keys(me.options.serverHeaders).length) ? "jsonp" : "",
                     headers: me.options.serverHeaders || {},
                     onsuccess: function (r) {
                         try {
-                            var config = isJsonp ? r : eval("(" + r.responseText + ")");
-                            config = me.options.serverResponsePrepare( config )
-                            // console.log('me.options.before', me.options.audioConfig);
+                            if (!me.options) return;
+                            var config = UE.api.parseResponse(me, r && typeof r.responseText === 'string' ? r.responseText : r);
                             me.options = utils.merge(me.options, config);
-                            // console.log('server.config', config.audioConfig);
-                            // console.log('me.options.after', me.options.audioConfig);
-                            me.fireEvent("serverConfigLoaded");
-                            me._serverConfigLoaded = true;
                         } catch (e) {
                             showErrorMsg(me.getLang("loadconfigFormatError")+':'+e);
+                            return;
                         }
+                        finishConfig();
                     },
                     onerror: function () {
+                        if (!me.options) return;
                         showErrorMsg(me.getLang("loadconfigHttpError"));
                     }
                 });
@@ -54,7 +62,9 @@
         });
 
         function showErrorMsg(msg) {
+            if (!me.options) return;
             console && console.error(msg);
+            me.fireEvent('serverConfigError', msg);
             //me.fireEvent('showMessage', {
             //    'title': msg,
             //    'type': 'error'
@@ -71,8 +81,8 @@
         if (!handler || !utils.isFunction(handler)) return;
         var me = this;
         var readyHandler = function () {
-            handler.apply(me, arguments);
             me.removeListener("serverConfigLoaded", readyHandler);
+            handler.apply(me, arguments);
         };
 
         if (me.isServerConfigLoaded()) {

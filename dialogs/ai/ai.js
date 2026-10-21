@@ -7,83 +7,65 @@ var isMultiLine = function (text) {
 }
 
 var fetchStream = function (url, option, onStream, onFinish) {
-    fetch(url, Object.assign({
-        method: 'POST',
-    }, option)).then(response => {
-        if (!response.ok) {
-            onFinish({ code: -1, msg: `HTTP error! status: ${response.status}` })
-            return
+    var controller = new AbortController(), reader, finished = false;
+    var textList = [];
+    function cancelReader() {
+        if (reader) reader.cancel().catch(function () {});
+    }
+    function finish(result) {
+        if (finished) return;
+        finished = true;
+        cancelReader();
+        onFinish(result);
+    }
+    function success() { finish({code: 0, msg: 'ok', data: {text: textList.join('')}}); }
+    function processEvent(event) {
+        var lines = event.split(/\r?\n/).filter(function (line) { return line.indexOf('data:') === 0; });
+        if (!lines.length) return;
+        var json = lines.map(function (line) { return line.slice(5).replace(/^ /, ''); }).join('\n');
+        if (json.trim() === '[DONE]') { success(); return; }
+        var data = JSON.parse(json), text;
+        if (data.error) { finish({code: -1, msg: data.error.message || String(data.error)}); return; }
+        if (data.choices && data.choices[0] && data.choices[0].delta) text = data.choices[0].delta.content;
+        else if (data.type === 'error') { finish({code: -1, msg: data.data}); return; }
+        else if (data.type === 'end') { success(); return; }
+        else if (data.type === 'data') text = data.data;
+        // Role, usage and stop-reason events legitimately carry no text.
+        if (typeof text === 'string' && text) {
+            textList.push(text);
+            onStream({code: 0, msg: 'ok', data: {text: text}});
         }
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder('utf-8');
-        let buffer = '';
-        const textList = []
-
-        function processChunk(chunk) {
-            buffer += decoder.decode(chunk, { stream: true });
-            // 分割事件流，每个事件以"data:"开头，以两个换行符结束
-            const lines = buffer.split('\n');
-            for (let line of lines) {
-                line = line.trim();
-                if (line.startsWith('data:')) {
-                    const jsonStr = line.replace('data:', '').trim();
-                    if (jsonStr === '[DONE]') {
-                        onFinish({ code: 0, msg: 'ok', data: { text: textList.join('') } })
-                        return;
-                    }
-                    try {
-                        let text = null
-                        const data = JSON.parse(jsonStr);
-                        if (data.choices && data.choices.length > 0 && data.choices[0].delta) {
-                            text = data.choices[0].delta.content
-                        } else if (data.type) {
-                            // 兼容ModStart
-                            // {"type":"error","data":"xxx"}
-                            // {"type":"end","data":"xxx"}
-                            // {"type":"data","data":"xxx"}
-                            if (data.type === 'error') {
-                                onFinish({ code: -1, msg: data.data })
-                                return;
-                            } else if (data.type === 'end') {
-                                onFinish({ code: 0, msg: 'ok', data: { text: textList.join('') } })
-                                return;
-                            } else if (data.type === 'data') {
-                                text = data.data
-                            }
-                        }
-                        if (text !== null) {
-                            textList.push(text)
-                            onStream({ code: 0, msg: 'ok', data: { text: text } })
-                        } else {
-                            onFinish({ code: -1, msg: 'No text found!' })
-                            console.log('data:', data)
-                        }
-                    } catch (e) {
-                        onFinish({ code: -1, msg: 'JSON parse error!' + e })
-                    }
-                }
+    }
+    fetch(url, Object.assign({method: 'POST'}, option, {signal: controller.signal})).then(async function (response) {
+        if (finished) return;
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        reader = response.body.getReader();
+        var decoder = new TextDecoder('utf-8'), buffer = '';
+        while (!finished) {
+            var chunk = await reader.read();
+            if (finished) return;
+            buffer += chunk.done ? decoder.decode() : decoder.decode(chunk.value, {stream: true});
+            var separator;
+            while (!finished && (separator = /\r?\n\r?\n/.exec(buffer))) {
+                var event = buffer.slice(0, separator.index);
+                buffer = buffer.slice(separator.index + separator[0].length);
+                processEvent(event);
             }
-            buffer = lines.pop() || '';
+            if (chunk.done) {
+                if (!finished && buffer.trim()) processEvent(buffer);
+                if (!finished) success();
+                return;
+            }
         }
-
-        function read() {
-            reader.read().then(({ done, value }) => {
-                if (done) {
-                    if (buffer) processChunk(new Uint8Array());
-                    return;
-                }
-                processChunk(value);
-                read();
-            }).catch(error => {
-                onFinish({ code: -1, msg: 'Stream error!' + error })
-            });
-        }
-
-        read();
-    }).catch(error => {
-        onFinish({ code: -1, msg: 'Request error!' + error })
+    }).catch(function (error) {
+        if (!finished) finish({code: -1, msg: error.message || String(error)});
     });
-}
+    return function () {
+        finished = true;
+        controller.abort();
+        cancelReader();
+    };
+};
 
 var openAiCompletion = function (url, param, option) {
     option = Object.assign({
@@ -99,7 +81,7 @@ var openAiCompletion = function (url, param, option) {
             stream: true,
         }
     }
-    fetchStream(
+    return fetchStream(
         url,
         {
             headers: {
@@ -115,7 +97,7 @@ var openAiCompletion = function (url, param, option) {
 
 var drivers = {
     'ModStart': function (param) {
-        openAiCompletion(aiConfig.driverConfig.url, param, {
+        return openAiCompletion(aiConfig.driverConfig.url, param, {
             body: {
                 systemPrompt: param.systemPromptText,
                 prompt: param.promptText
@@ -123,43 +105,43 @@ var drivers = {
         })
     },
     'OpenAi': function (param) {
-        openAiCompletion(aiConfig.driverConfig.url || 'https://api.openai.com/v1/chat/completions', param)
+        return openAiCompletion(aiConfig.driverConfig.url || 'https://api.openai.com/v1/chat/completions', param)
     },
     'DeepSeek': function (param) {
-        openAiCompletion(aiConfig.driverConfig.url || 'https://api.deepseek.com/v1/chat/completions', param)
+        return openAiCompletion(aiConfig.driverConfig.url || 'https://api.deepseek.com/v1/chat/completions', param)
     },
     'Anthropic': function (param) {
-        openAiCompletion(aiConfig.driverConfig.url || 'https://api.anthropic.com/v1/messages', param)
+        return openAiCompletion(aiConfig.driverConfig.url || 'https://api.anthropic.com/v1/messages', param)
     },
     'Google': function (param) {
-        openAiCompletion(aiConfig.driverConfig.url || 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', param)
+        return openAiCompletion(aiConfig.driverConfig.url || 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', param)
     },
     'Baidu': function (param) {
-        openAiCompletion(aiConfig.driverConfig.url || 'https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat/completions', param)
+        return openAiCompletion(aiConfig.driverConfig.url || 'https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat/completions', param)
     },
     'Alibaba': function (param) {
-        openAiCompletion(aiConfig.driverConfig.url || 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', param)
+        return openAiCompletion(aiConfig.driverConfig.url || 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', param)
     },
     'Tencent': function (param) {
-        openAiCompletion(aiConfig.driverConfig.url || 'https://hunyuan.tencentcloudapi.com/v1/chat/completions', param)
+        return openAiCompletion(aiConfig.driverConfig.url || 'https://hunyuan.tencentcloudapi.com/v1/chat/completions', param)
     },
     'Huawei': function (param) {
-        openAiCompletion(aiConfig.driverConfig.url || 'https://pangu.huaweicloud.com/v1/chat/completions', param)
+        return openAiCompletion(aiConfig.driverConfig.url || 'https://pangu.huaweicloud.com/v1/chat/completions', param)
     },
     'ByteDance': function (param) {
-        openAiCompletion(aiConfig.driverConfig.url || 'https://ark.cn-beijing.volces.com/api/v3/chat/completions', param)
+        return openAiCompletion(aiConfig.driverConfig.url || 'https://ark.cn-beijing.volces.com/api/v3/chat/completions', param)
     },
     'Zhipu': function (param) {
-        openAiCompletion(aiConfig.driverConfig.url || 'https://open.bigmodel.cn/api/paas/v4/chat/completions', param)
+        return openAiCompletion(aiConfig.driverConfig.url || 'https://open.bigmodel.cn/api/paas/v4/chat/completions', param)
     },
     'Moonshot': function (param) {
-        openAiCompletion(aiConfig.driverConfig.url || 'https://api.moonshot.cn/v1/chat/completions', param)
+        return openAiCompletion(aiConfig.driverConfig.url || 'https://api.moonshot.cn/v1/chat/completions', param)
     },
     'iFlytek': function (param) {
-        openAiCompletion(aiConfig.driverConfig.url || 'https://spark-api-open.xf-yun.com/v1/chat/completions', param)
+        return openAiCompletion(aiConfig.driverConfig.url || 'https://spark-api-open.xf-yun.com/v1/chat/completions', param)
     },
     'Volcengine': function (param) {
-        openAiCompletion(aiConfig.driverConfig.url || 'https://ark.cn-beijing.volces.com/api/v3/chat/completions', param)
+        return openAiCompletion(aiConfig.driverConfig.url || 'https://ark.cn-beijing.volces.com/api/v3/chat/completions', param)
     },
 }
 
@@ -186,7 +168,7 @@ var Ai = {
         range: null,
     },
     init: function () {
-        new Vue({
+        var app = new Vue({
             el: '#app',
             data: {
                 loading: false,
@@ -198,6 +180,7 @@ var Ai = {
                 resultText: '',
                 resultError: '',
                 functions: [],
+                cancelRequest: null,
                 showInsert: AiDefaultAiFunctionParam.showInsert,
                 showReplace: AiDefaultAiFunctionParam.showReplace,
                 showReplaceAll: AiDefaultAiFunctionParam.showReplaceAll,
@@ -239,10 +222,11 @@ var Ai = {
                         if (!f.enable(enableParam)) {
                             return null;
                         }
-                        f.prompt = f.prompt.replace(/\{selectText\}/g, enableParam.selectText);
-                        f.prompt = f.prompt.replace(/\{html\}/g, editor.getContent());
-                        f.param = Object.assign({}, AiDefaultAiFunctionParam, f.param);
-                        return f;
+                        var copy = Object.assign({}, f);
+                        copy.prompt = f.prompt.replace(/\{selectText\}/g, function () { return enableParam.selectText; });
+                        copy.prompt = copy.prompt.replace(/\{html\}/g, function () { return editor.getContent(); });
+                        copy.param = Object.assign({}, AiDefaultAiFunctionParam, f.param);
+                        return copy;
                     }).filter(function (f) {
                         return !!f;
                     });
@@ -261,27 +245,34 @@ var Ai = {
                     var driverRequest = getRequest(aiConfig.driver)
                     if (!driverRequest) {
                         editor.tipError('未找到驱动');
+                        this.loading = false;
                         return;
                     }
-                    driverRequest({
-                        systemPromptText: this.systemPromptText,
-                        promptText: this.promptText,
-                        onStream: (res) => {
-                            if (res.code) {
-                                this.resultError = res.msg;
-                                return;
+                    try {
+                        this.cancelRequest = driverRequest({
+                            systemPromptText: this.systemPromptText,
+                            promptText: this.promptText,
+                            onStream: (res) => {
+                                if (res.code) {
+                                    this.resultError = res.msg;
+                                    return;
+                                }
+                                this.resultText += res.data.text
+                            },
+                            onFinish: (res) => {
+                                this.loading = false;
+                                this.cancelRequest = null;
+                                if (res.code) {
+                                    this.resultError = res.msg;
+                                    return;
+                                }
+                                this.resultText = res.data.text;
                             }
-                            this.resultText += res.data.text
-                        },
-                        onFinish: (res) => {
-                            this.loading = false;
-                            if (res.code) {
-                                this.resultError = res.msg;
-                                return;
-                            }
-                            this.resultText = res.data.text;
-                        }
-                    })
+                        });
+                    } catch (error) {
+                        this.loading = false;
+                        this.resultError = error.message || String(error);
+                    }
                 },
                 doSubmitFunction: function (f) {
                     this.submitFunction = f;
@@ -338,6 +329,13 @@ var Ai = {
                 }
             }
         });
+        function onClose() {
+            dialog.removeListener('close', onClose);
+            if (typeof app.cancelRequest === 'function') app.cancelRequest();
+            app.cancelRequest = null;
+            app.loading = false;
+        }
+        dialog.addListener('close', onClose);
     },
 };
 utils.domReady(function () {

@@ -18,6 +18,7 @@
             'core/api.js',
             'core/image.js',
             'core/dialog.js',
+            'core/contentstyles.js',
             'core/filterword.js',
             'core/node.js',
             'core/htmlparser.js',
